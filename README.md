@@ -2,6 +2,19 @@
 
 Prints an X/Twitter thread, or a tweet with its full X Article, from a tweet URL as plain text or JSON. Single tweets and articles need no login. Full threads need the cookies of a throwaway account. No API key, no dependencies.
 
+```
+$ xthread https://x.com/posthog/status/2109706421919248499
+1. @posthog — Mon Oct 12 18:03:02 +0000 2026
+   We have built 10 different AI products at PostHog ... Here are the 38 most important lessons:
+   likes=1582 retweets=98 replies=27 bookmarks=4471 quotes=53 views=229301
+
+2. @posthog — Mon Oct 12 18:03:04 +0000 2026
+   1. AI can make your product worse. It can be slow and unreliable, ...
+...
+40. @posthog — Mon Oct 12 18:04:56 +0000 2026
+   Subscribe for more lessons like these: https://posthog.com/newsletter
+```
+
 ## Setup
 
 ```bash
@@ -12,93 +25,73 @@ xthread https://x.com/chhddavid/status/2100537116635672690
 ## Usage
 
 ```bash
-xthread <tweet-url>            # --plain (default)
+xthread <tweet-url>            # plain text (default)
 xthread <tweet-url> --json
 xthread <url-or-raw-id> --timeout 30
 ```
 
-Accepts `https://x.com/<author>/<status>` / `https://twitter.com/...` / a raw
-numeric tweet ID.
+It accepts `https://x.com/<user>/status/<id>`, `https://twitter.com/...` or a raw numeric ID. stdout holds data only. Errors go to stderr.
 
-- **stdout is data only** — human-readable text (`--plain`, default) or pure
-  JSON (`--json`). No progress chatter.
-- `--timeout N` sets a per-request timeout in seconds (default 30).
+## What you get
 
-## The mechanism (3 sentences)
+| Input | Without cookies | With cookies |
+|---|---|---|
+| Single tweet | The tweet and its stats | Same |
+| Long post (over 280 characters) | Full text | Same |
+| X Article | Full article text | Same |
+| Multi-tweet thread | First tweet only | Every tweet in the thread, oldest first |
 
-1. X's public web client ships a **static Bearer token**; posting it to
-   `POST https://api.x.com/1.1/guest/activate.json` returns a throwaway **guest
-   token**, requiring no API key and no login.
-2. That guest token calls X's internal web GraphQL op **`TweetResultByRestId`**
-   (which X's own web app allows to anonymous guests), returning the focal
-   tweet's text, author, counts and dates, plus — with the
-   `withArticlePlainText=true` field toggle — the **full body of any linked X
-   Article** as `plain_text`.
-3. That single guest call is the entire keyless path: xthread reads the tweet
-   and its article straight from X's own web API, without a logged-in session
-   or a headless browser.
+Links are expanded from `t.co` to the real URL. In plain output the stats line shows on the first tweet only. In `--json` output every tweet is in `thread.tweets`.
 
-## What it returns for the test tweet
+## Thread walk
 
-For `https://x.com/chhddavid/status/2100537116635672690` (keyless, live):
+X only answers the thread call (`TweetDetail`) to a logged-in session. To read full threads:
 
-- **Author:** `@chhddavid` (user_id 2732582439)
-- **Tweet text:** `https://t.co/iFzB9PR6Ho` (an X Article link)
-- **Stats:** likes 1255, retweets 72, replies 26, bookmarks ~6967, quotes 18,
-  views ~909k
-- **Created:** `Thu Sep 17 10:47:29 +0000 2026`
-- **Article title:** *I manually studied 30,600 iOS apps making $20k-100k/mo+,
-  the recipe is stupidly easy.*
-- **Article body:** 21,474 characters / 424 content blocks — the complete
-  article, returned in one keyless call.
+1. Make a new X account. Do not use your main account. X can lock accounts that scrape.
+2. Sign in to it in a normal browser.
+3. Export the `x.com` cookies as a Netscape `cookies.txt`, with any cookie-export extension.
+4. Save the file as `~/.config/xthread/cookies.txt`, or set `XTHREAD_COOKIES` to its path.
+5. Run `chmod 600` on the file. It holds a login token. Do not commit it or share it.
 
-So the "thread" for this tweet is the **article**: the tweet is a single post
-whose content is an X Article, and xthread returns that full article text.
+xthread uses only `auth_token` and `ct0` from the file. It follows the "show more" pages and keeps the replies of the first author in a chain. Replies from other users and promoted tweets are skipped. If the author replied twice to one tweet, only the earlier branch is followed.
 
-## Thread walk (needs a throwaway X account)
+Checked on 2026-10-17: a 40-tweet thread and a 76-tweet thread. Both gave the same tweet counts as twitter-thread.com.
 
-1. Make a new X account. Do not use your main one: X can lock accounts that scrape.
-2. Sign in with a normal browser and export `x.com` cookies as Netscape `cookies.txt`.
-3. Save the file as `~/.config/xthread/cookies.txt` (mode 600) or set `$XTHREAD_COOKIES`.
-   Only `auth_token` and `ct0` are used. Never commit this file.
-
-xthread then calls `TweetDetail`, follows the `ShowMore` cursors, and prints the
-same-author reply chain, oldest first. Checked 2026-10-17: 40 tweets (@posthog) and
-76 tweets (a Turkish football thread), the same counts twitter-thread.com shows.
-If X rejects the session (expired cookies, locked account) xthread exits 5. It does
-not print a partial thread. The `TweetDetail` query id rotates, so xthread reads the
-current one from X's `main.js` when the built-in one fails.
+If X rejects the cookies (expired, or the account is locked), xthread exits with code 5 and prints the reason. It never prints a partial thread as if it were complete.
 
 ## Exit codes
 
-| code | meaning |
+| Code | Meaning |
 |----:|---------|
-| 0 | success — tweet (and article body, when present) fetched and printed |
-| 1 | usage error (bad / missing args) |
-| 2 | not a thread — standalone single tweet, no article; still printed |
-| 3 | tweet not found |
-| 4 | network / timeout error |
-| 5 | auth / rate-limit / unexpected error |
+| 0 | Success. A thread or an article was printed. |
+| 1 | Bad or missing arguments. |
+| 2 | One tweet, no article. It is still printed. This is also the result for a thread when no cookies file exists. |
+| 3 | Tweet not found. |
+| 4 | Network error or timeout. |
+| 5 | X rejected the request: rate limit, bad cookies, or an unexpected response. |
 
-## Limits (read these before building on it)
+## How it works
 
-1. **A multi-tweet thread cannot be walked keylessly.** `TweetDetail` only
-   answers a logged-in session. Without a session file xthread returns the
-   focal tweet plus any linked article and says so in the JSON `thread.note`.
-   With a session file it walks the whole thread (see "Thread walk" below).
-2. **Rate limits are tight.** The guest path is throttled; the token and
-   endpoints are intended for light, occasional use. Aggressive use returns
-   429s (exit 5).
-3. **The tokens/IDs are scraped, not official.** The static Bearer token and the
-   GraphQL query IDs come from X's public web-client JavaScript. X can rotate
-   them at any time, breaking the keyless path. This is a reverse-engineered
-   integration against a non-public endpoint, not a stable supported API.
-4. **Public content only.** Private, age-gated, or behind-paywall tweets are
-   not reachable this way.
+Single tweets and articles use X's guest API. The public web client contains a fixed bearer token. xthread sends it to `guest/activate.json` for a guest token. It then calls `TweetResultByRestId` with `withArticlePlainText=true`, which returns the tweet and any article body in one request.
 
-## Files
+Threads use `TweetDetail` with your session cookies. The query ID of that call changes every few weeks. xthread has one built in. When X answers 400 or 404, it reads the current ID from the `main.js` file that x.com serves, and retries once.
 
-- `xthread.py` — the CLI (stdlib only: `argparse`, `urllib`, `json`, `os`, `re`,
-  `textwrap`, `secrets`, `sys`).
-- `tests/test_xthread.py` — `python3 -m unittest discover -s tests`. The fixture is
-  a real `TweetDetail` response.
+## Limits
+
+- This is a reverse-engineered use of X's web API. It is not an official API. X can change it at any time, and then xthread breaks until it is updated.
+- Public tweets only. Private accounts and deleted tweets are not available.
+- Use light, occasional reads. X rate-limits both the guest path and the session. A 429 gives exit code 5.
+- Thread reading depends on one throwaway account. If X locks it, make a new one and export new cookies.
+
+## Development
+
+```bash
+git clone https://github.com/ekinertac/xthread && cd xthread
+python3 -m unittest discover -s tests
+```
+
+The tests need no network and no account. The fixture is a saved `TweetDetail` response with public tweets. Python 3.9 or newer.
+
+## License
+
+MIT
