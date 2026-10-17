@@ -1,0 +1,8 @@
+__pycache__/
+dist/
+*.egg-info/
+README.html
+cookies*.txt
+*cookies*.txt
+.env
+REVIEW.*

@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+# PyPI name differs from the command: "xthread" is taken by an unrelated threading library.
+name = "xthread-cli"
+version = "0.1.0"
+description = "Read an X/Twitter thread or article from a tweet URL. Stdlib only."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "ekinertac" }]
+requires-python = ">=3.9"
+keywords = ["twitter", "x", "thread", "cli", "scraper"]
+classifiers = [
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Utilities",
+]
+dependencies = []
+
+[project.scripts]
+xthread = "xthread:main"
+
+[tool.hatch.build.targets.wheel]
+include = ["xthread.py"]
+
+[tool.hatch.build.targets.sdist]
+include = ["xthread.py", "tests", "README.md", "LICENSE"]
