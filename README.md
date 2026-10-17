@@ -40,8 +40,28 @@ It accepts `https://x.com/<user>/status/<id>`, `https://twitter.com/...` or a ra
 | Long post (over 280 characters) | Full text | Same |
 | X Article | Full article text | Same |
 | Multi-tweet thread | First tweet only | Every tweet in the thread, oldest first |
+| Photos, videos, GIFs | URLs | Same |
 
 Links are expanded from `t.co` to the real URL. In plain output the stats line shows on the first tweet only. In `--json` output every tweet is in `thread.tweets`.
+
+## Media
+
+xthread prints the URLs of photos, videos and GIFs. It does not download them. Use `curl -O <url>` for that.
+
+Lines from real threads, printed under their tweet:
+
+```
+   [photo] https://pbs.twimg.com/media/HUcvAlGa8AAmyVK.jpg?name=orig
+   [video 0:58] https://video.twimg.com/amplify_video/2107400232904355841/vid/avc1/1280x588/oMK57WldoEUsd-bF.mp4?tag=29
+```
+
+When the author wrote alt text, an `alt: ...` line follows.
+
+- **Photo:** the full-size file (`?name=orig`).
+- **Video and GIF:** the MP4 with the highest bitrate. X serves GIFs as MP4. The HLS playlist (`.m3u8`) is skipped.
+- **JSON:** each tweet has a `media` list. Each item has `type` (`photo`, `video` or `gif`) and `url`. Videos and GIFs also have `thumbnail` and `duration_ms`. `alt_text` is set when the author wrote one.
+- The `pic.x.com` link that X adds to the tweet text is removed, because the media list replaces it.
+- Quoted tweets and link cards are not read yet.
 
 ## Thread walk
 

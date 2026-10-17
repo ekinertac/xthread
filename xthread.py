@@ -357,6 +357,33 @@ def parse_tweet_id(url):
     return None, None
 
 
+def extract_media(legacy):
+    """Photos, videos and GIFs of one tweet as [{type, url, ...}].
+
+    Photos get ?name=orig for the full-size file. Videos and GIFs (X serves GIFs as
+    MP4) get the highest-bitrate MP4 variant; the HLS playlist is skipped because
+    nothing plain can play it. `thumbnail` is the poster image.
+    """
+    raw = (legacy.get("extended_entities") or legacy.get("entities") or {}).get("media") or []
+    items = []
+    for m in raw:
+        kind = m.get("type")
+        poster = m.get("media_url_https")
+        if kind == "photo":
+            item = {"type": "photo", "url": f"{poster}?name=orig"}
+        else:
+            info = m.get("video_info") or {}
+            mp4 = [v for v in info.get("variants") or []
+                   if v.get("content_type") == "video/mp4" and v.get("url")]
+            best = max(mp4, key=lambda v: v.get("bitrate") or 0)["url"] if mp4 else poster
+            item = {"type": "gif" if kind == "animated_gif" else "video", "url": best,
+                    "thumbnail": poster, "duration_ms": info.get("duration_millis")}
+        if m.get("ext_alt_text"):
+            item["alt_text"] = m["ext_alt_text"]
+        items.append(item)
+    return items
+
+
 def flatten(result):
     """Normalize a raw TweetResultByRestId result into a clean dict."""
     legacy = result.get("legacy") or {}
@@ -401,6 +428,11 @@ def flatten(result):
     for u in (note.get("entity_set") or legacy.get("entities") or {}).get("urls") or []:
         if u.get("url") and u.get("expanded_url"):
             text = text.replace(u["url"], u["expanded_url"])
+    media = extract_media(legacy)
+    for m in (legacy.get("extended_entities") or legacy.get("entities") or {}).get("media") or []:
+        if m.get("url"):  # the pic.x.com link X appends; the media list replaces it
+            text = text.replace(m["url"], "")
+    text = text.rstrip()
     return {
         "rest_id": result.get("rest_id") or legacy.get("id_str"),
         "text": text,
@@ -419,8 +451,17 @@ def flatten(result):
             "replies": legacy.get("reply_count"),
             "views": views,
         },
+        "media": media,
         "article": article,
     }
+
+
+def _media_line(m):
+    label = m["type"]
+    if m.get("duration_ms"):
+        s = m["duration_ms"] // 1000
+        label += f" {s // 60}:{s % 60:02d}"
+    return f"   [{label}] {m['url']}"
 
 
 def to_plain(tweets):
@@ -430,6 +471,10 @@ def to_plain(tweets):
         author = (tweet["author"] or {}).get("screen_name") or "unknown"
         lines.append(f"{n}. @{author} — {tweet['created_at'] or ''}")
         lines.append("   " + tweet["text"])
+        for m in tweet.get("media") or []:
+            lines.append(_media_line(m))
+            if m.get("alt_text"):
+                lines.append("   alt: " + " ".join(m["alt_text"].split()))
         if n == 1:
             s = tweet["stats"]
             lines.append(f"   likes={s.get('likes')} retweets={s.get('retweets')} "
@@ -522,6 +567,7 @@ def main(argv=None):
         "in_reply_to_status_id": tweet["in_reply_to_status_id"],
         "conversation_id_str": tweet["conversation_id_str"],
         "stats": tweet["stats"],
+        "media": tweet["media"],
         "is_article": bool(tweet["article"]),
         "is_multi_tweet_thread": multi,
         "article": tweet["article"],

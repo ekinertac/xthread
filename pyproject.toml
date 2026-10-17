@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 # PyPI name differs from the command: "xthread" is taken by an unrelated threading library.
 name = "xthread-cli"
-version = "0.1.0"
+version = "0.2.0"
 description = "Read an X/Twitter thread or article from a tweet URL. Stdlib only."
 readme = "README.md"
 license = "MIT"

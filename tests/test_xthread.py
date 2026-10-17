@@ -175,6 +175,70 @@ class WalkThread(unittest.TestCase):
                 X.walk_thread({"auth_token": "a", "ct0": "c"}, "1")
 
 
+def media_legacy(*media, text="look https://t.co/pic"):
+    return {"rest_id": "1", "legacy": {"id_str": "1", "full_text": text,
+                                       "extended_entities": {"media": list(media)}}}
+
+
+class Media(unittest.TestCase):
+    PHOTO = {"type": "photo", "media_url_https": "https://pbs.twimg.com/media/A.jpg",
+             "url": "https://t.co/pic", "ext_alt_text": "a  cat\non a mat"}
+    VIDEO = {"type": "video", "media_url_https": "https://pbs.twimg.com/ext_tw_video_thumb/B.jpg",
+             "url": "https://t.co/pic",
+             "video_info": {"duration_millis": 95000, "variants": [
+                 {"content_type": "application/x-mpegURL", "url": "https://v/pl.m3u8"},
+                 {"bitrate": 632000, "content_type": "video/mp4", "url": "https://v/low.mp4"},
+                 {"bitrate": 2176000, "content_type": "video/mp4", "url": "https://v/high.mp4"}]}}
+    GIF = {"type": "animated_gif", "media_url_https": "https://pbs.twimg.com/tweet_video_thumb/C.jpg",
+           "url": "https://t.co/pic",
+           "video_info": {"variants": [{"bitrate": 0, "content_type": "video/mp4", "url": "https://v/g.mp4"}]}}
+
+    def test_photo_gets_orig_size_and_alt_text(self):
+        (m,) = X.flatten(media_legacy(self.PHOTO))["media"]
+        self.assertEqual(m["type"], "photo")
+        self.assertEqual(m["url"], "https://pbs.twimg.com/media/A.jpg?name=orig")
+        self.assertEqual(m["alt_text"], "a  cat\non a mat")
+
+    def test_video_picks_highest_bitrate_mp4_not_hls(self):
+        (m,) = X.flatten(media_legacy(self.VIDEO))["media"]
+        self.assertEqual(m["type"], "video")
+        self.assertEqual(m["url"], "https://v/high.mp4")
+        self.assertEqual(m["duration_ms"], 95000)
+        self.assertTrue(m["thumbnail"].endswith("B.jpg"))
+
+    def test_gif_is_typed_gif_and_uses_its_mp4(self):
+        (m,) = X.flatten(media_legacy(self.GIF))["media"]
+        self.assertEqual((m["type"], m["url"]), ("gif", "https://v/g.mp4"))
+
+    def test_video_without_mp4_falls_back_to_poster(self):
+        vid = dict(self.VIDEO, video_info={"variants": [
+            {"content_type": "application/x-mpegURL", "url": "https://v/pl.m3u8"}]})
+        (m,) = X.flatten(media_legacy(vid))["media"]
+        self.assertEqual(m["url"], self.VIDEO["media_url_https"])
+
+    def test_media_link_is_removed_from_text(self):
+        self.assertEqual(X.flatten(media_legacy(self.PHOTO))["text"], "look")
+
+    def test_tweet_without_media_has_empty_list(self):
+        self.assertEqual(X.flatten({"rest_id": "1", "legacy": {"id_str": "1", "full_text": "hi"}})["media"], [])
+
+    def test_real_response_has_photo_tweets(self):
+        tweets, _ = X.parse_detail(load_fixture())
+        flat = [X.flatten(t) for t in tweets.values()]
+        with_media = [t for t in flat if t["media"]]
+        self.assertEqual(len(with_media), 3)
+        self.assertTrue(all(m["url"].endswith("?name=orig") for t in with_media for m in t["media"]))
+        self.assertFalse(any("t.co/" in t["text"] and "pic." in t["text"] for t in with_media))
+
+    def test_plain_output_lists_media_under_the_tweet(self):
+        tweet = X.flatten(media_legacy(self.PHOTO, self.VIDEO))
+        tweet["author"], tweet["stats"] = {"screen_name": "a"}, {}
+        out = X.to_plain([tweet])
+        self.assertIn("[photo] https://pbs.twimg.com/media/A.jpg?name=orig", out)
+        self.assertIn("alt: a cat on a mat", out)
+        self.assertIn("[video 1:35] https://v/high.mp4", out)
+
+
 class FlattenAndPlain(unittest.TestCase):
     def test_note_tweet_text_beats_truncated_legacy_and_links_expand(self):
         result = {"rest_id": "1",
